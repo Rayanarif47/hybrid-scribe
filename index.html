@@ -225,7 +225,7 @@
     setStatus('Creating visit…', 'yellow');
 
     try {
-      const resp = await fetch(`${BASE_URL}/visits/`, {
+      const resp = await fetch(`${BASE_URL}/api/visits/`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
