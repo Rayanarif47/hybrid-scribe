@@ -248,7 +248,7 @@
   }
 
   function openWebSocket() {
-    ws = new WebSocket(`${WS_BASE}/hybrid/${visitId}`);
+    ws = new WebSocket(`${WS_BASE}/api/hybrid/${visitId}`);
     ws.binaryType = 'arraybuffer';
 
     ws.onopen = () => setStatus('WebSocket open — waiting for ElevenLabs session…', 'yellow');
