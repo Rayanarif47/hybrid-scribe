@@ -1,0 +1,364 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Hybrid Scribe — Realtime + Diarized</title>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; background: #0f172a; color: #e2e8f0; min-height: 100vh; padding: 2rem; }
+    h1 { font-size: 1.5rem; font-weight: 700; color: #f8fafc; margin-bottom: 0.25rem; }
+    .subtitle { font-size: 0.85rem; color: #94a3b8; margin-bottom: 2rem; }
+    .badge { display: inline-block; padding: 0.2rem 0.6rem; border-radius: 9999px; font-size: 0.7rem; font-weight: 600; margin-left: 0.5rem; }
+    .badge-blue { background: #1e40af; color: #bfdbfe; }
+    .badge-green { background: #14532d; color: #86efac; }
+    .badge-purple { background: #6b21a8; color: #e9d5ff; }
+
+    .card { background: #1e293b; border-radius: 12px; border: 1px solid #334155; padding: 1.5rem; margin-bottom: 1.25rem; }
+    .card-title { font-size: 0.75rem; font-weight: 600; text-transform: uppercase; letter-spacing: 0.05em; color: #64748b; margin-bottom: 1rem; }
+
+    .form-grid { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 0.75rem; }
+    .form-group label { display: block; font-size: 0.8rem; color: #94a3b8; margin-bottom: 0.4rem; }
+    .form-group input {
+      width: 100%; background: #0f172a; border: 1px solid #334155; border-radius: 8px;
+      padding: 0.5rem 0.75rem; color: #e2e8f0; font-size: 0.875rem;
+    }
+    .form-group input:focus { outline: none; border-color: #6366f1; }
+
+    button {
+      padding: 0.6rem 1.4rem; border-radius: 8px; border: none; font-size: 0.875rem;
+      font-weight: 600; cursor: pointer; transition: all 0.15s;
+    }
+    button:disabled { opacity: 0.4; cursor: not-allowed; }
+    .btn-primary { background: #6366f1; color: #fff; }
+    .btn-primary:hover:not(:disabled) { background: #4f46e5; }
+    .btn-danger { background: #dc2626; color: #fff; }
+    .btn-danger:hover:not(:disabled) { background: #b91c1c; }
+
+    .controls { display: flex; gap: 0.75rem; align-items: center; margin-top: 1rem; flex-wrap: wrap; }
+    .visit-info { font-size: 0.8rem; color: #64748b; }
+    .visit-info span { color: #a5b4fc; font-family: monospace; }
+
+    #statusBar {
+      display: flex; align-items: center; gap: 0.5rem; padding: 0.6rem 1rem;
+      border-radius: 8px; font-size: 0.85rem; margin-bottom: 1rem;
+      background: #1e293b; border: 1px solid #334155; min-height: 2.5rem;
+    }
+    .dot { width: 8px; height: 8px; border-radius: 50%; flex-shrink: 0; }
+    .dot-gray   { background: #475569; }
+    .dot-yellow { background: #eab308; animation: pulse 1s infinite; }
+    .dot-green  { background: #22c55e; animation: pulse 1s infinite; }
+    .dot-red    { background: #ef4444; }
+    .dot-blue   { background: #60a5fa; animation: pulse 1s infinite; }
+    @keyframes pulse { 0%,100%{opacity:1} 50%{opacity:0.4} }
+
+    .transcript-box {
+      background: #0f172a; border-radius: 8px; border: 1px solid #1e293b;
+      padding: 1rem; min-height: 120px; max-height: 300px; overflow-y: auto;
+      font-size: 0.875rem; line-height: 1.6;
+    }
+    #partialBox { color: #a78bfa; font-style: italic; }
+    #partialBox .empty { color: #334155; }
+
+    .diarized-line { margin-bottom: 0.4rem; }
+    .speaker-doctor  { color: #60a5fa; }
+    .speaker-patient { color: #4ade80; }
+    .speaker-other   { color: #fbbf24; }
+    .speaker-label { font-weight: 700; margin-right: 0.35rem; }
+
+    .summary-box {
+      background: #0f172a; border-radius: 8px; border: 1px solid #1e293b;
+      padding: 1rem; min-height: 80px; max-height: 400px; overflow-y: auto;
+      font-size: 0.85rem; line-height: 1.7; white-space: pre-wrap; color: #cbd5e1;
+    }
+
+    .timer { font-variant-numeric: tabular-nums; font-family: monospace; color: #f59e0b; font-size: 0.9rem; }
+    .hidden { display: none !important; }
+  </style>
+</head>
+<body>
+
+<h1>Hybrid Scribe <span class="badge badge-blue">Realtime WS</span><span class="badge badge-purple">Batch Diarized</span></h1>
+<p class="subtitle">Live partial transcripts via ElevenLabs realtime WS · Doctor/Patient labeling via scribe_v2 batch · IBM clinical summary</p>
+
+<!-- Setup -->
+<div class="card" id="setupCard">
+  <div class="card-title">Session Setup</div>
+  <div class="form-grid">
+    <div class="form-group">
+      <label>Patient ID</label>
+      <input id="patientId" type="text" placeholder="e.g. patient_001" value="patient_001" />
+    </div>
+    <div class="form-group">
+      <label>Provider ID</label>
+      <input id="providerId" type="text" placeholder="e.g. dr_smith" value="dr_smith" />
+    </div>
+    <div class="form-group">
+      <label>Visit Type</label>
+      <input id="visitType" type="text" placeholder="e.g. follow_up" value="follow_up" />
+    </div>
+  </div>
+  <div class="controls">
+    <button class="btn-primary" id="connectBtn" onclick="createAndConnect()">Create Visit &amp; Connect</button>
+  </div>
+</div>
+
+<!-- Status bar -->
+<div id="statusBar">
+  <div class="dot dot-gray" id="statusDot"></div>
+  <span id="statusText">Not connected</span>
+</div>
+
+<!-- Recording controls (shown after ready) -->
+<div class="card hidden" id="recordCard">
+  <div class="card-title">Recording</div>
+  <div class="visit-info" id="visitInfo"></div>
+  <div class="controls" style="margin-top:0.75rem;">
+    <button class="btn-danger hidden" id="stopBtn" onclick="stopRecording()">⏹ Stop &amp; Diarize</button>
+    <span class="timer hidden" id="timer">0:00</span>
+  </div>
+</div>
+
+<!-- Live Partials -->
+<div class="card hidden" id="partialCard">
+  <div class="card-title">Live Partial Transcript</div>
+  <div class="transcript-box" id="partialBox">
+    <span class="empty">Waiting for audio…</span>
+  </div>
+</div>
+
+<!-- Diarized Transcript -->
+<div class="card hidden" id="diarizedCard">
+  <div class="card-title">
+    Diarized Transcript
+    <span class="badge badge-blue">Doctor</span>
+    <span class="badge badge-green">Patient</span>
+  </div>
+  <div class="transcript-box" id="diarizedBox"></div>
+</div>
+
+<!-- Summary -->
+<div class="card hidden" id="summaryCard">
+  <div class="card-title">Clinical Summary</div>
+  <div class="summary-box" id="summaryBox"></div>
+</div>
+
+<script>
+  const BASE_URL = 'http://localhost:8000/api';
+  const WS_BASE  = 'ws://localhost:8000/api';
+
+  let ws           = null;
+  let mediaStream  = null;
+  let audioCtx     = null;
+  let processor    = null;
+  let visitId      = null;
+  let timerInterval = null;
+  let elapsed      = 0;
+
+  function setStatus(msg, type = 'gray') {
+    document.getElementById('statusText').textContent = msg;
+    document.getElementById('statusDot').className = 'dot dot-' + type;
+  }
+
+  function show(id) { document.getElementById(id).classList.remove('hidden'); }
+  function hide(id) { document.getElementById(id).classList.add('hidden'); }
+
+  function startTimer() {
+    elapsed = 0;
+    clearInterval(timerInterval);
+    timerInterval = setInterval(() => {
+      elapsed++;
+      const m = Math.floor(elapsed / 60);
+      const s = elapsed % 60;
+      document.getElementById('timer').textContent = `${m}:${s.toString().padStart(2, '0')}`;
+    }, 1000);
+  }
+
+  function stopTimer() { clearInterval(timerInterval); }
+
+  function appendPartial(text) {
+    const box = document.getElementById('partialBox');
+    box.innerHTML = `<span>${escHtml(text)}</span>`;
+    box.scrollTop = box.scrollHeight;
+  }
+
+  function renderDiarized(labeledText) {
+    const box = document.getElementById('diarizedBox');
+    box.innerHTML = '';
+    for (const line of labeledText.split('\n')) {
+      if (!line.trim()) continue;
+      const div = document.createElement('div');
+      div.className = 'diarized-line';
+      const colonIdx = line.indexOf(':');
+      if (colonIdx > 0) {
+        const speaker = line.substring(0, colonIdx).trim();
+        const text    = line.substring(colonIdx + 1).trim();
+        const lbl = document.createElement('span');
+        lbl.className = 'speaker-label ' + speakerClass(speaker);
+        lbl.textContent = speaker + ':';
+        const txt = document.createElement('span');
+        txt.textContent = ' ' + text;
+        div.appendChild(lbl);
+        div.appendChild(txt);
+      } else {
+        div.textContent = line;
+      }
+      box.appendChild(div);
+    }
+    box.scrollTop = box.scrollHeight;
+  }
+
+  function speakerClass(name) {
+    const l = name.toLowerCase();
+    if (l === 'doctor')  return 'speaker-doctor';
+    if (l === 'patient') return 'speaker-patient';
+    return 'speaker-other';
+  }
+
+  function escHtml(s) {
+    return s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+  }
+
+  async function createAndConnect() {
+    const btn = document.getElementById('connectBtn');
+    btn.disabled = true;
+    setStatus('Creating visit…', 'yellow');
+
+    try {
+      const resp = await fetch(`${BASE_URL}/visits/`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          patient_id:  document.getElementById('patientId').value.trim()  || null,
+          provider_id: document.getElementById('providerId').value.trim() || null,
+          visit_type:  document.getElementById('visitType').value.trim()  || null,
+        }),
+      });
+      if (!resp.ok) throw new Error(`Visit creation failed: HTTP ${resp.status}`);
+      const data = await resp.json();
+      visitId = data.visit_id;
+      document.getElementById('visitInfo').innerHTML = `Visit: <span>${visitId}</span>`;
+
+      setStatus('Connecting to hybrid scribe…', 'yellow');
+      openWebSocket();
+    } catch (err) {
+      setStatus(`Error: ${err.message}`, 'red');
+      btn.disabled = false;
+    }
+  }
+
+  function openWebSocket() {
+    ws = new WebSocket(`${WS_BASE}/hybrid/${visitId}`);
+    ws.binaryType = 'arraybuffer';
+
+    ws.onopen = () => setStatus('WebSocket open — waiting for ElevenLabs session…', 'yellow');
+
+    ws.onmessage = async (evt) => {
+      let msg;
+      try { msg = JSON.parse(evt.data); } catch { return; }
+
+      switch (msg.type) {
+        case 'ready':
+          setStatus('Recording…', 'green');
+          show('recordCard');
+          show('partialCard');
+          show('stopBtn');
+          show('timer');
+          startTimer();
+          await startMicrophone();
+          break;
+
+        case 'partial':
+          appendPartial(msg.text);
+          break;
+
+        case 'status':
+          setStatus(msg.message, 'blue');
+          break;
+
+        case 'diarized_transcript':
+          stopTimer();
+          hide('stopBtn');
+          hide('timer');
+          setStatus(
+            `Diarization complete — lang: ${msg.language || 'unknown'} · speakers: ${(msg.speakers || []).join(', ')}`,
+            'blue'
+          );
+          show('diarizedCard');
+          renderDiarized(msg.labeled_text);
+          break;
+
+        case 'summary':
+          show('summaryCard');
+          document.getElementById('summaryBox').textContent = msg.text;
+          break;
+
+        case 'done':
+          setStatus('Session complete ✓', 'green');
+          cleanupAudio();
+          break;
+
+        case 'error':
+          setStatus(`Error: ${msg.message}`, 'red');
+          cleanupAudio();
+          break;
+      }
+    };
+
+    ws.onclose = (evt) => {
+      if (evt.code !== 1000) setStatus(`WebSocket closed (${evt.code})`, 'red');
+      cleanupAudio();
+    };
+
+    ws.onerror = () => setStatus('WebSocket error', 'red');
+  }
+
+  async function startMicrophone() {
+    try {
+      mediaStream = await navigator.mediaDevices.getUserMedia({ audio: true, video: false });
+      audioCtx    = new AudioContext({ sampleRate: 16000 });
+      const source = audioCtx.createMediaStreamSource(mediaStream);
+      processor    = audioCtx.createScriptProcessor(4096, 1, 1);
+
+      processor.onaudioprocess = (e) => {
+        if (!ws || ws.readyState !== WebSocket.OPEN) return;
+        const f32  = e.inputBuffer.getChannelData(0);
+        const pcm  = floatTo16BitPCM(f32);
+        ws.send(pcm);
+      };
+
+      source.connect(processor);
+      processor.connect(audioCtx.destination);
+    } catch (err) {
+      setStatus(`Microphone error: ${err.message}`, 'red');
+    }
+  }
+
+  function floatTo16BitPCM(float32) {
+    const buf  = new ArrayBuffer(float32.length * 2);
+    const view = new DataView(buf);
+    for (let i = 0; i < float32.length; i++) {
+      const s = Math.max(-1, Math.min(1, float32[i]));
+      view.setInt16(i * 2, s < 0 ? s * 0x8000 : s * 0x7FFF, true);
+    }
+    return buf;
+  }
+
+  function stopRecording() {
+    document.getElementById('stopBtn').disabled = true;
+    setStatus('Stopping — running batch diarization…', 'blue');
+    cleanupAudio();
+    if (ws && ws.readyState === WebSocket.OPEN) {
+      ws.send(JSON.stringify({ type: 'stop' }));
+    }
+  }
+
+  function cleanupAudio() {
+    if (processor)   { try { processor.disconnect(); }  catch {} processor   = null; }
+    if (audioCtx)    { try { audioCtx.close(); }        catch {} audioCtx    = null; }
+    if (mediaStream) { mediaStream.getTracks().forEach(t => t.stop()); mediaStream = null; }
+    stopTimer();
+  }
+</script>
+</body>
+</html>
